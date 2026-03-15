@@ -14,7 +14,6 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import me.him188.ani.app.data.models.episode.EpisodeCollectionInfo
 import me.him188.ani.app.data.models.episode.EpisodeInfo
-import me.him188.ani.app.domain.episode.SubjectRecommendation
 import me.him188.ani.datasources.api.EpisodeSort
 import me.him188.ani.datasources.api.EpisodeType
 import me.him188.ani.datasources.api.topic.UnifiedCollectionType
@@ -61,20 +60,4 @@ internal val PreviewScope = CoroutineScope(
     CoroutineExceptionHandler { _, _ -> },
 )
 
-@Stable
-@TestOnly
-internal val PreviewSubjectRecommendations = buildList {
-    repeat(10) {
-        add(
-            SubjectRecommendation(
-                subjectId = it.toLong(),
-                name = "Subject Recommendation $it",
-                nameCn = "推荐条目中文名称 $it",
-                imageUrl = "",
-                uri = null,
-                desc1 = "2021 年 10 月",
-                desc2 = "2 万收藏 · 8.0 分",
-            ),
-        )
-    }
-}
+

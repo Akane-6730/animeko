@@ -87,14 +87,10 @@ import me.him188.ani.app.data.models.subject.SubjectInfo
 import me.him188.ani.app.data.models.subject.Tag
 import me.him188.ani.app.domain.danmaku.DanmakuLoadingState
 import me.him188.ani.app.domain.episode.SetEpisodeCollectionTypeRequest
-import me.him188.ani.app.domain.episode.SubjectRecommendation
 import me.him188.ani.app.domain.media.TestMediaList
 import me.him188.ani.app.domain.media.cache.EpisodeCacheStatus
 import me.him188.ani.app.domain.player.VideoLoadingState
 import me.him188.ani.app.navigation.LocalNavigator
-import me.him188.ani.app.navigation.SubjectDetailPlaceholder
-import me.him188.ani.app.platform.LocalContext
-import me.him188.ani.app.platform.navigation.LocalBrowserNavigator
 import me.him188.ani.app.ui.episode.share.MediaShareData
 import me.him188.ani.app.ui.foundation.ProvideCompositionLocalsForPreview
 import me.him188.ani.app.ui.foundation.animation.AniAnimatedVisibility
@@ -135,7 +131,6 @@ import me.him188.ani.app.ui.subject.episode.details.components.DanmakuSourceCard
 import me.him188.ani.app.ui.subject.episode.details.components.DanmakuSourceSettingsDropdown
 import me.him188.ani.app.ui.subject.episode.details.components.FavoriteIconButton
 import me.him188.ani.app.ui.subject.episode.details.components.PlayingEpisodeItemDefaults
-import me.him188.ani.app.ui.subject.episode.details.components.SubjectRecommendationCard
 import me.him188.ani.app.ui.subject.episode.details.components.formatDanmakuShiftMillis
 import me.him188.ani.app.ui.subject.episode.details.components.renderDanmakuServiceId
 import me.him188.ani.app.ui.subject.episode.statistics.DanmakuMatchInfoSummaryRow
@@ -149,10 +144,6 @@ import me.him188.ani.danmaku.api.provider.DanmakuProviderId
 import me.him188.ani.datasources.api.Media
 import me.him188.ani.datasources.api.source.MediaFetchRequest
 import me.him188.ani.datasources.api.topic.UnifiedCollectionType
-import me.him188.ani.utils.analytics.Analytics
-import me.him188.ani.utils.analytics.AnalyticsEvent.Companion.SubjectEnter
-import me.him188.ani.utils.analytics.AnalyticsEvent.Companion.SubjectRecommendationClick
-import me.him188.ani.utils.analytics.recordEvent
 import me.him188.ani.utils.platform.annotations.TestOnly
 import kotlin.math.roundToLong
 
@@ -160,7 +151,6 @@ import kotlin.math.roundToLong
 class EpisodeDetailsState(
     val subjectInfo: State<SubjectInfo>,
     val airingLabelState: AiringLabelState,
-    val recommendations: State<List<SubjectRecommendation>>,
     val subjectDetailsStateLoader: SubjectDetailsStateLoader,
 ) {
     private val subject by subjectInfo
@@ -244,14 +234,9 @@ fun EpisodeDetails(
         }
     }
 
-    val context = LocalContext.current
-    val browserNavigator = LocalBrowserNavigator.current
-
     var expandDanmakuStatistics by rememberSaveable { mutableStateOf(false) }
     var expandEpisodeList by rememberSaveable { mutableStateOf(false) }
     var expandDanmakuList by rememberSaveable { mutableStateOf(false) }
-
-    val subjectRecommendations by remember(state) { state.recommendations }
 
     EditableSubjectCollectionTypeDialogsHost(editableSubjectCollectionTypeState)
 
@@ -518,49 +503,7 @@ fun EpisodeDetails(
                 )
             }
         } else null,
-        subjectRecommendations = { horizontalPadding ->
-            item("subject_recommendation_header") {
-                SectionTitle {
-                    Text("相关推荐")
-                }
-            }
-            for (recommendation in subjectRecommendations) {
-                item("subject_recommendation_${recommendation.uniqueId}") {
-                    SubjectRecommendationCard(
-                        {
-                            val uri = recommendation.uri
-                            val targetSubjectId = recommendation.subjectId?.toInt()
-                            Analytics.recordEvent(SubjectRecommendationClick) {
-                                targetSubjectId?.let { put("subject_id", it) }
-                                uri?.let { put("target_uri", it) }
-                            }
-                            Analytics.recordEvent(SubjectEnter) {
-                                put("source", "episode_recommendation")
-                                targetSubjectId?.let { put("subject_id", it) }
-                                uri?.let { put("target_uri", it) }
-                            }
-                            if (uri != null) {
-                                browserNavigator.openBrowser(context, uri)
-                            } else if (targetSubjectId != null) {
-                                navigator.navigateSubjectDetails(
-                                    targetSubjectId,
-                                    SubjectDetailPlaceholder(
-                                        id = targetSubjectId,
-                                        name = recommendation.name,
-                                        nameCN = recommendation.nameCn ?: "",
-                                        coverUrl = recommendation.imageUrl,
-                                    ),
-                                )
-                            }
-                        },
-                        recommendation,
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontalPadding),
-                    )
-                }
-            }
-        },
+        subjectRecommendations = { _ -> },
         onExpandSubject = {
             showSubjectDetails = true
             state.subjectDetailsStateLoader.load(state.subjectId, state.subjectInfo.value)
@@ -954,7 +897,6 @@ private fun rememberTestEpisodeDetailsState(
         EpisodeDetailsState(
             subjectInfo = mutableStateOf(subjectInfo),
             airingLabelState = createTestAiringLabelState(),
-            recommendations = mutableStateOf(PreviewSubjectRecommendations),
             subjectDetailsStateLoader = createTestSubjectDetailsLoader(scope),
         )
     }
