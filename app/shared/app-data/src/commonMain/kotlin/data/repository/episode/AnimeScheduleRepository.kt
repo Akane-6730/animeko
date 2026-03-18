@@ -25,6 +25,8 @@ import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.hours
+import kotlin.time.Clock
+import kotlin.time.Instant
 
 class AnimeScheduleRepository(
     private val animeScheduleService: AnimeScheduleService,
@@ -32,6 +34,9 @@ class AnimeScheduleRepository(
     private val updatePeriod: Duration = 1.hours,
     defaultDispatcher: CoroutineContext = Dispatchers.Default,
 ) : Repository(defaultDispatcher) {
+    @Volatile
+    private var cachedSchedules: CachedSchedules? = null
+
     private val refreshTicker = flow {
         while (true) {
             emit(Unit)
@@ -74,9 +79,22 @@ class AnimeScheduleRepository(
      */
     fun recentSchedulesFlow(): Flow<List<AnimeScheduleInfo>> {
         return flow {
-            emit(animeScheduleService.getLatestAnimeScheduleInfos())
+            val cached = cachedSchedules
+            val now = Clock.System.now()
+            if (cached != null && now - cached.fetchedAt < updatePeriod) {
+                emit(cached.schedules)
+            }
+
+            val latest = animeScheduleService.getLatestAnimeScheduleInfos()
+            cachedSchedules = CachedSchedules(Clock.System.now(), latest)
+            emit(latest)
         }.flowOn(defaultDispatcher)
     }
+
+    private data class CachedSchedules(
+        val fetchedAt: Instant,
+        val schedules: List<AnimeScheduleInfo>,
+    )
 
 
 //    fun recentScheduleSubjectsFlow(): Flow<List<SubjectCollectionInfo>> =
