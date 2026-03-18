@@ -9,7 +9,6 @@
 
 package me.him188.ani.app.data.repository.subject
 
-import androidx.collection.MutableIntList
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
@@ -19,16 +18,17 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import me.him188.ani.app.data.models.schedule.AnimeSeasonId
 import me.him188.ani.app.data.models.schedule.yearMonths
-import me.him188.ani.app.data.network.AniSubjectSearchService
 import me.him188.ani.app.data.network.BangumiSearchFilters
 import me.him188.ani.app.data.network.BangumiSubjectSearchService
 import me.him188.ani.app.data.network.BatchSubjectDetails
-import me.him188.ani.app.data.network.SubjectService
 import me.him188.ani.app.data.repository.Repository
 import me.him188.ani.app.data.repository.RepositoryException
+import me.him188.ani.app.data.repository.RepositoryNetworkException
 import me.him188.ani.app.domain.search.RatingRange
 import me.him188.ani.app.domain.search.SearchSort
 import me.him188.ani.app.domain.search.SubjectSearchQuery
@@ -36,16 +36,12 @@ import me.him188.ani.app.domain.search.SubjectType
 import me.him188.ani.datasources.api.topic.UnifiedCollectionType
 import me.him188.ani.datasources.bangumi.models.BangumiSubjectType
 import me.him188.ani.datasources.bangumi.models.search.BangumiSort
-import me.him188.ani.utils.logging.logger
-import me.him188.ani.utils.logging.warn
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.cancellation.CancellationException
 
 class SubjectSearchRepository(
     private val bangumiSubjectSearchService: BangumiSubjectSearchService,
-    private val aniSubjectSearchService: AniSubjectSearchService,
     private val subjectCollectionRepository: SubjectCollectionRepository,
-    private val subjectService: SubjectService,
     defaultDispatcher: CoroutineContext = Dispatchers.Default,
 ) : Repository(defaultDispatcher) {
 
@@ -58,20 +54,22 @@ class SubjectSearchRepository(
         searchQuery: SubjectSearchQuery,
         useNewApi: suspend () -> Boolean = { false },
         ignoreDoneAndDropped: suspend () -> Boolean = { false },
+        timeoutMillis: Long = 4_000,
         pagingConfig: PagingConfig = bangumiSearchPagingConfig
     ): Flow<PagingData<BatchSubjectDetails>> = Pager(
         config = pagingConfig,
         initialKey = 0,
 //        remoteMediator = SubjectSearchRemoteMediator(useNewApi, searchQuery, pagingConfig),
         pagingSourceFactory = {
-            SubjectSearchPagingSource(useNewApi, ignoreDoneAndDropped, searchQuery)
+            SubjectSearchPagingSource(useNewApi, ignoreDoneAndDropped, searchQuery, timeoutMillis)
         },
     ).flow.flowOn(defaultDispatcher)
 
     private inner class SubjectSearchPagingSource(
         private val useNewApi: suspend () -> Boolean,
         private val ignoreDoneAndDropped: suspend () -> Boolean,
-        private val searchQuery: SubjectSearchQuery
+        private val searchQuery: SubjectSearchQuery,
+        private val timeoutMillis: Long,
     ) : PagingSource<Int, BatchSubjectDetails>() {
         private val filters = searchQuery.toBangumiSearchFilters()
         override fun getRefreshKey(state: PagingState<Int, BatchSubjectDetails>): Int? = null
@@ -81,77 +79,69 @@ class SubjectSearchRepository(
             val offset = params.key
                 ?: return@withContext LoadResult.Error(IllegalArgumentException("Key is null"))
             return@withContext try {
-                val res = /*bangumiSubjectSearchService.searchSubjectIds*/aniSubjectSearchService.searchSubjects(
+                val useNewApiValue = useNewApi()
+                val subjectInfos = searchBangumi(offset, params, useNewApiValue)
+
+                val filtered = filterByExclusion(subjectInfos, ignoreDoneAndDropped())
+                val filteredBySort = filterSubjectsBySort(filtered, searchQuery.sort)
+
+                return@withContext LoadResult.Page(
+                    filteredBySort,
+                    prevKey = if (offset == 0) null else offset,
+                    nextKey = if (filteredBySort.isEmpty()) null else offset + params.loadSize,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: TimeoutCancellationException) {
+                return@withContext LoadResult.Error(RepositoryNetworkException("Search timeout", e))
+            } catch (e: Exception) {
+                LoadResult.Error(RepositoryException.wrapOrThrowCancellation(e))
+            }
+        }
+
+        private suspend fun searchBangumi(
+            offset: Int,
+            params: LoadParams<Int>,
+            useNewApi: Boolean,
+        ): List<BatchSubjectDetails> {
+            val res = withTimeout(timeoutMillis) {
+                bangumiSubjectSearchService.searchSubjects(
                     searchQuery.keywords,
-                    useNewApi = useNewApi(),
+                    useNewApi = useNewApi,
                     offset = offset,
                     limit = params.loadSize,
                     filters = filters,
                     sort = searchQuery.sort.toBangumiSort(),
                 )
-
-                val filtered = if (ignoreDoneAndDropped()) {
-                    val excludedIds = subjectCollectionRepository.getSubjectIdsByCollectionType(
-                        types = listOf(UnifiedCollectionType.DONE, UnifiedCollectionType.DROPPED),
-                    ).first()
-
-                    buildList {
-                        res.forEach { if (it.subjectInfo.subjectId !in excludedIds) add(it) }
-                    }
-                } else {
-                    res
-                }
-
-                // 在分页源中直接过滤掉不符合条件的数据 #2380
-                val subjectInfos = filterSubjectsBySort(filtered, searchQuery.sort)
-
-                return@withContext LoadResult.Page(
-                    subjectInfos,
-                    prevKey = if (offset == 0) null else offset,
-                    nextKey = if (subjectInfos.isEmpty()) null else offset + params.loadSize,
+            }
+            if (useNewApi || offset != 0 || searchQuery.keywords.isBlank() || res.isNotEmpty()) {
+                return res
+            }
+            return withTimeout(timeoutMillis) {
+                bangumiSubjectSearchService.searchSubjects(
+                    searchQuery.keywords,
+                    useNewApi = true,
+                    offset = offset,
+                    limit = params.loadSize,
+                    filters = filters,
+                    sort = searchQuery.sort.toBangumiSort(),
                 )
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                try {
-                    Companion.logger.warn(e) { "Failed to search by ANI api, trying fallback Bangumi api." }
+            }
+        }
 
-                    val res = bangumiSubjectSearchService.searchSubjectIds(
-                        searchQuery.keywords,
-                        useNewApi = useNewApi(),
-                        offset = offset,
-                        limit = params.loadSize,
-                        filters = filters,
-                        sort = searchQuery.sort.toBangumiSort(),
-                    )
+        private suspend fun filterByExclusion(
+            subjects: List<BatchSubjectDetails>,
+            ignoreDoneAndDropped: Boolean,
+        ): List<BatchSubjectDetails> {
+            if (!ignoreDoneAndDropped) {
+                return subjects
+            }
+            val excludedIds = subjectCollectionRepository.getSubjectIdsByCollectionType(
+                types = listOf(UnifiedCollectionType.DONE, UnifiedCollectionType.DROPPED),
+            ).first().toHashSet()
 
-                    val filtered = if (ignoreDoneAndDropped()) {
-                        val excludedIds = subjectCollectionRepository.getSubjectIdsByCollectionType(
-                            types = listOf(UnifiedCollectionType.DONE, UnifiedCollectionType.DROPPED),
-                        ).first()
-
-                        MutableIntList().apply {
-                            res.forEach { if (it !in excludedIds) add(it) }
-                        }
-                    } else {
-                        res
-                    }
-
-                    val subjectInfos = filterSubjectsBySort(
-                        subjectService.batchGetSubjectDetails(filtered),
-                        searchQuery.sort,
-                    )
-
-                    return@withContext LoadResult.Page(
-                        subjectInfos,
-                        prevKey = if (offset == 0) null else offset,
-                        nextKey = if (subjectInfos.isEmpty()) null else offset + params.loadSize,
-                    )
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    LoadResult.Error(RepositoryException.wrapOrThrowCancellation(e))
-                }
+            return buildList {
+                subjects.forEach { if (!excludedIds.contains(it.subjectInfo.subjectId)) add(it) }
             }
         }
 
@@ -262,10 +252,10 @@ class SubjectSearchRepository(
 //    }
 
     private companion object {
-        private val logger = logger<SubjectSearchRepository>()
         private val bangumiSearchPagingConfig = PagingConfig(
             pageSize = 20, // Bangumi API 实际最多返回 20 个结果 #2417
             initialLoadSize = 20,
+            prefetchDistance = 5,
         )
     }
 }
@@ -273,4 +263,3 @@ class SubjectSearchRepository(
 private fun SubjectType.toBangumiSubjectType(): BangumiSubjectType = when (this) {
     SubjectType.ANIME -> BangumiSubjectType.Anime
 }
-
