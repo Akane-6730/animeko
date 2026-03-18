@@ -57,6 +57,12 @@ class SearchViewModel(
 
     private val nsfwSettingFlow = settingsRepository.uiSettings.flow.map { it.searchSettings.nsfwMode }
         .stateIn(backgroundScope, SharingStarted.Lazily, NsfwMode.HIDE)
+    private val enableNewSearchApiFlow = settingsRepository.uiSettings.flow
+        .map { it.searchSettings.enableNewSearchSubjectApi }
+        .stateIn(backgroundScope, SharingStarted.Lazily, false)
+    private val ignoreDoneAndDroppedFlow = settingsRepository.uiSettings.flow
+        .map { it.searchSettings.ignoreDoneAndDroppedSubjects }
+        .stateIn(backgroundScope, SharingStarted.Lazily, false)
 
     private val hasInitialSearchQuery = initialSearchQuery.normalized().hasSearchRequest()
     private val queryFlow = MutableStateFlow(initialSearchQuery.normalized())
@@ -79,46 +85,31 @@ class SearchViewModel(
         searchState = PagingSearchState(
             createPager = { scope ->
                 val rawQuery = queryFlow.value.normalized()
-                // 搜索 R18 条目时, 需要强制显示
                 val explicitR18 = rawQuery.tags?.contains("R18") == true
-
-                val query = rawQuery
-                    .copy(
-                        nsfw = when {
-                            explicitR18 -> true
-                            nsfwSettingFlow.value == NsfwMode.HIDE -> false
-                            else -> null
-                        },
-                    )
+                val query = rawQuery.copy(
+                    nsfw = when {
+                        explicitR18 -> true
+                        nsfwSettingFlow.value == NsfwMode.HIDE -> false
+                        else -> null
+                    },
+                )
+                val useNewApi = query.hasFilters() || enableNewSearchApiFlow.value
+                val ignoreDoneAndDropped = ignoreDoneAndDroppedFlow.value
 
                 subjectSearchRepository.searchSubjects(
-                    query,
-                    useNewApi = {
-                        query.hasFilters() ||
-                                settingsRepository.uiSettings.flow.map { it.searchSettings.enableNewSearchSubjectApi }
-                                    .first()
-                    },
-                    ignoreDoneAndDropped = {
-                        settingsRepository.uiSettings.flow.map { it.searchSettings.ignoreDoneAndDroppedSubjects }
-                            .first()
-                    },
+                    searchQuery = query,
+                    useNewApi = { useNewApi },
+                    ignoreDoneAndDropped = { ignoreDoneAndDropped },
                 ).combine(nsfwSettingFlow) { data, nsfwMode ->
-                    // 当 settings 变更时, 会重新计算所有的 SubjectPreviewItemInfo 以更新其显示状态, 但不会重新搜索.
                     data.map { subject ->
                         SubjectPreviewItemInfo.compute(
                             subject.subjectInfo,
                             subject.mainEpisodeCount,
-                            nsfwModeSettings = if (explicitR18) {
-                                // 搜索 R18 条目时, 需要强制显示
-                                NsfwMode.DISPLAY
-                            } else {
-                                nsfwMode
-                            },
+                            nsfwModeSettings = if (explicitR18) NsfwMode.DISPLAY else nsfwMode,
                             relatedPersonList = subject.lightSubjectRelations.lightRelatedPersonInfoList,
                             characters = subject.lightSubjectRelations.lightRelatedCharacterInfoList,
                         )
                     }
-                    // 我们必须保证 data 的数量和 map 后的数量一致, 否则会导致 Pager 搜索下一页时使用的 offset 有误.
                 }.cachedIn(scope)
             },
             backgroundScope,

@@ -112,56 +112,56 @@ internal fun SearchResultColumn(
 
     val itemsState = rememberUpdatedState(items)
 
-    SearchResultLazyVerticalGrid(
-        items,
-        error = {
-            LoadErrorCard(
-                error = it,
-                onRetry = { items.retry() },
-                modifier = Modifier.fillMaxWidth(), // noop
-            )
-        },
-        modifier
-            .focusGroup()
-            .onSizeChanged { height = it.height }
-            .keyboardDirectionToSelectItem(
-                selectedItemIndex,
-            ) {
-                state.animateScrollToItem(it)
-                onSelect(it)
-            }
-            .keyboardPageToScroll({ height.toFloat() }) {
-                state.animateScrollBy(it)
+    SharedTransitionLayout {
+        SearchResultLazyVerticalGrid(
+            items,
+            error = {
+                LoadErrorCard(
+                    error = it,
+                    onRetry = { items.retry() },
+                    modifier = Modifier.fillMaxWidth(), // noop
+                )
             },
-        cells = layoutParams.grid.gridCells,
-        state = state,
-        horizontalArrangement = layoutParams.grid.horizontalArrangement,
-        verticalArrangement = layoutParams.grid.verticalArrangement,
-        contentPadding = contentPadding,
-    ) {
-        headers()
+            modifier
+                .focusGroup()
+                .onSizeChanged { height = it.height }
+                .keyboardDirectionToSelectItem(
+                    selectedItemIndex,
+                ) {
+                    state.animateScrollToItem(it)
+                    onSelect(it)
+                }
+                .keyboardPageToScroll({ height.toFloat() }) {
+                    state.animateScrollBy(it)
+                },
+            cells = layoutParams.grid.gridCells,
+            state = state,
+            horizontalArrangement = layoutParams.grid.horizontalArrangement,
+            verticalArrangement = layoutParams.grid.verticalArrangement,
+            contentPadding = contentPadding,
+        ) {
+            headers()
 
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            val scope = remember(this, itemsState, aniMotionScheme) {
-                SearchResultColumnScopeImpl(itemsState, aniMotionScheme)
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                val scope = remember(this, itemsState, aniMotionScheme) {
+                    SearchResultColumnScopeImpl(itemsState, aniMotionScheme)
+                }
+
+                scope.summary()
             }
 
-            scope.summary()
-        }
+            items(
+                count = items.itemCount,
+                key = items.itemKey { it.subjectId },
+                contentType = items.itemContentType { 1 },
+            ) { index ->
+                val info = items[index]
 
-        items(
-            count = items.itemCount,
-            key = items.itemKey { it.subjectId },
-            contentType = items.itemContentType { 1 },
-        ) { index ->
-            val info = items[index]
-
-            SharedTransitionLayout {
                 AnimatedContent(
                     layoutParams.kind,
                     transitionSpec = aniMotionScheme.animatedContent.topLevel,
                 ) { targetKind ->
-                    var nsfwMaskState: NsfwMode by rememberSaveable(info?.title) {
+                    var nsfwMaskState: NsfwMode by rememberSaveable(info?.subjectId) {
                         mutableStateOf(info?.nsfwMode ?: NsfwMode.DISPLAY)
                     }
                     NsfwMask(
