@@ -49,6 +49,7 @@ import me.him188.ani.app.data.repository.RepositoryRateLimitedException
 import me.him188.ani.app.data.repository.RepositoryRequestError
 import me.him188.ani.app.data.repository.RepositoryServiceUnavailableException
 import me.him188.ani.app.data.repository.RepositoryUnknownException
+import me.him188.ani.app.domain.mediasource.web.SelectorMediaSourceBlockedException
 import me.him188.ani.app.domain.mediasource.instance.MediaSourceInstance
 import me.him188.ani.app.platform.currentAniBuildConfig
 import me.him188.ani.datasources.api.Media
@@ -200,7 +201,14 @@ class MediaSourceMediaFetcher(
                         sources.results.map { it.media }
                     }
                     .catch { exception ->
-                        state.value = MediaSourceFetchState.Failed(exception, restartCount)
+                        state.value = when (exception) {
+                            is SelectorMediaSourceBlockedException -> MediaSourceFetchState.Blocked(
+                                exception.message ?: sourceInfo.displayName,
+                                restartCount,
+                            )
+
+                            else -> MediaSourceFetchState.Failed(exception, restartCount)
+                        }
                         logUpstreamException(exception)
                     }
                     .runningFold(emptyList<Media>()) { acc, list ->
@@ -223,7 +231,7 @@ class MediaSourceMediaFetcher(
                             }
                         } else {
                             val currentState = state.value
-                            if (currentState !is MediaSourceFetchState.Failed) {
+                            if (currentState !is MediaSourceFetchState.Failed && currentState !is MediaSourceFetchState.Blocked) {
                                 // downstream (collector) failure
                                 state.value = MediaSourceFetchState.Abandoned(exception, restartCount)
                                 if (exception !is CancellationException) {
@@ -281,6 +289,10 @@ class MediaSourceMediaFetcher(
                             logger.warn { "Failed to fetch media from ${sourceInfo.displayName} due to request error: ${exception.localizedMessage}" }
                         }
                     }
+                }
+
+                is SelectorMediaSourceBlockedException -> {
+                    logger.info { "Stopped fetching media from ${sourceInfo.displayName}: ${exception.message}" }
                 }
 
                 else -> {

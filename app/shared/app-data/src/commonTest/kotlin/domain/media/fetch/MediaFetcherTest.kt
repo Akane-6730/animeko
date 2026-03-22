@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import me.him188.ani.app.domain.media.TestMediaList
+import me.him188.ani.app.domain.mediasource.web.SelectorMediaSourceBlockedException
 import me.him188.ani.app.domain.mediasource.instance.MediaSourceInstance
 import me.him188.ani.app.domain.mediasource.instance.createTestMediaSourceInstance
 import me.him188.ani.datasources.api.EpisodeSort
@@ -452,6 +453,26 @@ class MediaFetcherTest {
         assertIs<MediaSourceFetchState.Succeed>(res.state.value)
         assertEquals(5, res.resultsIfEnabled.first().size)
         assertEquals(5, res.results.first().size)
+    }
+
+    @Test
+    fun `blocked source becomes completed blocked state`() = runTest {
+        val session = createFetcher(
+            createTestMediaSourceInstance(
+                TestHttpMediaSource(
+                    kind = me.him188.ani.datasources.api.source.MediaSourceKind.WEB,
+                    fetch = {
+                        throw SelectorMediaSourceBlockedException("captcha required")
+                    },
+                ),
+            ),
+        ).newSession(request1)
+
+        val result = session.mediaSourceResults.first()
+        assertEquals(0, session.awaitCompletedResults().size)
+        val state = result.state.value
+        assertIs<MediaSourceFetchState.Blocked>(state)
+        assertEquals("captcha required", state.message)
     }
 
     ///////////////////////////////////////////////////////////////////////////

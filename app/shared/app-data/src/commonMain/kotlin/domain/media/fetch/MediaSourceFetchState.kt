@@ -33,6 +33,11 @@ sealed class MediaSourceFetchState {
         override val id: Int, // restartCount
     ) : Completed()
 
+    data class Blocked(
+        val message: String,
+        override val id: Int,
+    ) : Completed()
+
     /**
      * The data source upstream has failed. E.g. a network request failed.
      */
@@ -51,4 +56,5 @@ sealed class MediaSourceFetchState {
 val MediaSourceFetchState.isWorking get() = this is MediaSourceFetchState.Working
 val MediaSourceFetchState.isDisabled get() = this is MediaSourceFetchState.Disabled
 val MediaSourceFetchState.isFinal get() = this is MediaSourceFetchState.Completed || this is MediaSourceFetchState.Disabled
-val MediaSourceFetchState.isFailedOrAbandoned get() = this is MediaSourceFetchState.Failed || this is MediaSourceFetchState.Abandoned
+val MediaSourceFetchState.isFailedOrAbandoned get() =
+    this is MediaSourceFetchState.Failed || this is MediaSourceFetchState.Abandoned || this is MediaSourceFetchState.Blocked

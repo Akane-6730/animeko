@@ -75,10 +75,15 @@ class ObserveWebMediaSourcePreferenceExtension(
                     ) { preferredWebMediaSourceId, results ->
                         results.forEach {
                             if (it.mediaSourceId != preferredWebMediaSourceId) return@forEach
-                            if (it.state.value.isFailedOrAbandoned) {
+                            val state = it.state.value
+                            val shouldClearPreference = when (state) {
+                                is MediaSourceFetchState.Blocked -> !state.message.contains("not supported by the current player", ignoreCase = true)
+                                else -> state.isFailedOrAbandoned
+                            }
+                            if (shouldClearPreference) {
                                 logger.info {
                                     "Remove web source preference for subject ${context.subjectId} from ${it.mediaSourceId}. " +
-                                            "because source state in this session is ${it.state.value.str()}."
+                                            "because source state in this session is ${state.str()}."
                                 }
                                 setPreferredWebMediaSource(context.subjectId, null)
                             }
@@ -93,6 +98,7 @@ class ObserveWebMediaSourcePreferenceExtension(
         return when (this) {
             is MediaSourceFetchState.Failed -> "failed"
             is MediaSourceFetchState.Abandoned -> "abandoned"
+            is MediaSourceFetchState.Blocked -> "blocked"
             else -> this::class.simpleName!!.lowercase()
         }
     }
