@@ -150,6 +150,7 @@ fun KoinApplication.getCommonKoinModule(getContext: () -> Context, coroutineScop
     listOf(useCaseModules(), repositoryModules(getContext().dataStores), otherModules(getContext, coroutineScope))
 
 private fun KoinApplication.otherModules(getContext: () -> Context, coroutineScope: CoroutineScope) = module {
+    single<CoroutineScope> { coroutineScope }
     // Repositories
     single<ProxyProvider> { SettingsBasedProxyProvider(get(), coroutineScope) }
     single<SessionManager> {

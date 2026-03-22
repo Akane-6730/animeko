@@ -61,6 +61,7 @@ import me.him188.ani.app.domain.settings.GetMediaSelectorSettingsUseCase
 import me.him188.ani.app.domain.settings.GetMediaSelectorSettingsUseCaseImpl
 import me.him188.ani.app.domain.settings.GetVideoScaffoldConfigUseCase
 import me.him188.ani.app.domain.settings.GetVideoScaffoldConfigUseCaseImpl
+import kotlinx.coroutines.CoroutineScope
 import org.koin.core.KoinApplication
 import org.koin.dsl.module
 import org.koin.mp.KoinPlatform
@@ -78,7 +79,7 @@ fun KoinApplication.useCaseModules() = module {
     single<SetSubjectCollectionTypeOrDeleteUseCase> { SetSubjectCollectionTypeOrDeleteUseCaseImpl(get(), get(), get()) }
     single<SetEpisodeCollectionTypeUseCase> { SetEpisodeCollectionTypeUseCaseImpl(koin) }
     single<GetEpisodeCollectionTypeUseCase> { GetEpisodeCollectionTypeUseCaseImpl(koin) }
-    single<GetAnimeScheduleFlowUseCase> { GetAnimeScheduleFlowUseCaseImpl(get(), get()) }
+    single<GetAnimeScheduleFlowUseCase> { GetAnimeScheduleFlowUseCaseImpl(get(), get(), get<CoroutineScope>()) }
     single<PostCommentUseCase> { PostCommentUseCaseImpl(get()) }
     single<GetPreferredMediaSourceSortingUseCase> { GetPreferredMediaSourceSortingUseCaseImpl(get()) }
     single<GetMediaSelectorSourceTiersUseCase> { GetMediaSelectorSourceTiersUseCaseImpl(get()) }

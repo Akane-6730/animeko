@@ -9,10 +9,22 @@
 
 package me.him188.ani.app.ui.main
 
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+import me.him188.ani.app.domain.episode.GetAnimeScheduleFlowUseCase
 import me.him188.ani.app.ui.foundation.AbstractViewModel
 import me.him188.ani.app.ui.user.SelfInfoStateProducer
+import kotlin.time.Clock
 import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 
 class MainScreenSharedViewModel : AbstractViewModel(), KoinComponent {
+    private val getAnimeScheduleFlowUseCase: GetAnimeScheduleFlowUseCase by inject()
     val selfInfo = SelfInfoStateProducer(koin = getKoin()).flow
+
+    override fun init() {
+        val timeZone = TimeZone.currentSystemDefault()
+        val today = Clock.System.now().toLocalDateTime(timeZone).date
+        getAnimeScheduleFlowUseCase.prewarm(today, timeZone)
+    }
 }

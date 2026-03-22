@@ -9,7 +9,6 @@
 
 package me.him188.ani.app.ui.exploration.schedule
 
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.datetime.DatePeriod
@@ -19,9 +18,9 @@ import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
 import me.him188.ani.app.domain.episode.GetAnimeScheduleFlowUseCase
 import me.him188.ani.app.domain.foundation.LoadError
+import me.him188.ani.app.domain.episode.AiringScheduleForDate
 import me.him188.ani.app.domain.usecase.GlobalKoin
 import me.him188.ani.app.ui.foundation.AbstractViewModel
-import me.him188.ani.utils.coroutines.flows.FlowRestarter
 import me.him188.ani.utils.coroutines.flows.catching
 import me.him188.ani.utils.platform.annotations.TestOnly
 import org.koin.core.Koin
@@ -36,48 +35,57 @@ class ScheduleViewModel(
 
     private val getAnimeScheduleFlowUseCase: GetAnimeScheduleFlowUseCase by koin.inject()
 
-    private val airingSchedulesFlowRestarter = FlowRestarter()
-    private val airingSchedulesFlow =
-        getAnimeScheduleFlowUseCase(
-            today,
-            timeZone = timeZone,
-        ).catching()
-            .shareInBackground(started = SharingStarted.Lazily) // always cached
-
     private val days = ScheduleDay.generateForRecentTwoWeeks(today)
     val pageState = ScheduleScreenState { days }
 
     fun refresh() {
-        airingSchedulesFlowRestarter.restart()
+        getAnimeScheduleFlowUseCase.refresh(today, timeZone)
     }
 
-    val presentationFlow = airingSchedulesFlow.map { result ->
-        val timeZone = timeZone
-        SchedulePagePresentation(
-            days,
-            airingSchedules = result.getOrNull()?.map { airingSchedule ->
-                val currentDateTime = currentTime().toLocalDateTime(timeZone)
-                AiringSchedule(
-                    airingSchedule.date,
-                    SchedulePageDataHelper.toColumnItems(
-                        airingSchedule.list.map { it.toPresentation(timeZone) },
-                        addIndicator = currentDateTime.date == airingSchedule.date,
-                        currentDateTime.time,
-                    ),
-                )
-            }.orEmpty(),
+    private val initialPresentation = createPresentation(
+        airingSchedules = getAnimeScheduleFlowUseCase.peek(today, timeZone).orEmpty(),
+        error = null,
+        isPlaceholder = getAnimeScheduleFlowUseCase.peek(today, timeZone) == null,
+    )
+
+    val presentationFlow = getAnimeScheduleFlowUseCase(today, timeZone).catching().map { result ->
+        createPresentation(
+            airingSchedules = result.getOrNull().orEmpty(),
             error = result.exceptionOrNull()?.let { LoadError.fromException(it) },
+            isPlaceholder = false,
         )
     }.stateIn(
         backgroundScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = SchedulePagePresentation(
-            days,
-            generatePlaceholderAiringScheduleList(),
-            error = null,
-            isPlaceholder = true,
-        ),
+        started = kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000),
+        initialValue = initialPresentation,
     )
+
+    private fun createPresentation(
+        airingSchedules: List<AiringScheduleForDate>,
+        error: LoadError?,
+        isPlaceholder: Boolean,
+    ): SchedulePagePresentation {
+        val currentDateTime = currentTime().toLocalDateTime(timeZone)
+        return SchedulePagePresentation(
+            days,
+            airingSchedules = if (isPlaceholder) {
+                generatePlaceholderAiringScheduleList(baseDate = today)
+            } else {
+                airingSchedules.map { airingSchedule ->
+                    AiringSchedule(
+                        airingSchedule.date,
+                        SchedulePageDataHelper.toColumnItems(
+                            airingSchedule.list.map { it.toPresentation(timeZone) },
+                            addIndicator = currentDateTime.date == airingSchedule.date,
+                            currentDateTime.time,
+                        ),
+                    )
+                }
+            },
+            error = error,
+            isPlaceholder = isPlaceholder,
+        )
+    }
 
     private fun currentTime() = Clock.System.now()
 }
