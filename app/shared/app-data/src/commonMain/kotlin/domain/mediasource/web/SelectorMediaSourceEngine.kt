@@ -201,17 +201,39 @@ abstract class SelectorMediaSourceEngine {
         )
     }
 
-    data class SelectMediaResult(
+    internal data class SelectMediaResult(
         val originalList: List<DefaultMedia>,
         val filteredList: List<DefaultMedia>,
+        val mediaCandidates: List<SelectorMediaCandidate>,
     )
 
-    fun selectMedia(
+    internal fun evaluateSourceAccess(
+        config: SelectorSearchConfig,
+        currentPlayerName: String,
+    ): SelectorSourceAccessEvaluation {
+        val supportedPlayers = config.access.supportedPlayers.ifEmpty { config.onlySupportsPlayers }
+        val blockedReason = when {
+            supportedPlayers.isNotEmpty() && currentPlayerName !in supportedPlayers ->
+                SelectorSourceAccessBlockReason.UnsupportedPlayer
+
+            config.access.requiresAuth -> SelectorSourceAccessBlockReason.RequiresAuthentication
+            config.access.hasChallenge -> SelectorSourceAccessBlockReason.ChallengeRequired
+            else -> null
+        }
+
+        return SelectorSourceAccessEvaluation(
+            access = SelectorSourceAccessState(blockedReason),
+            bootstrap = config.createBootstrapConfig(),
+        )
+    }
+
+    internal fun selectMedia(
         episodes: Sequence<WebSearchEpisodeInfo>,
         config: SelectorSearchConfig,
         query: SelectorSearchQuery,
         mediaSourceId: String,
         subjectName: String,
+        access: SelectorSourceAccessState = SelectorSourceAccessState(),
     ): SelectMediaResult {
         val parser = LabelFirstRawTitleParser()
         val originalMediaList = episodes.mapNotNull { info ->
@@ -264,7 +286,11 @@ abstract class SelectorMediaSourceEngine {
             val filteredList = originalMediaList.filter {
                 filters.applyOn(it.asCandidate())
             }
-            SelectMediaResult(originalMediaList, filteredList)
+            SelectMediaResult(
+                originalList = originalMediaList,
+                filteredList = filteredList,
+                mediaCandidates = filteredList.map { SelectorMediaCandidate(it, access) },
+            )
         }
     }
 

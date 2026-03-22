@@ -98,10 +98,12 @@ data class SelectorSearchConfig(
      * @since 4.9
      */
     val onlySupportsPlayers: List<String> = emptyList(),
+    val access: SelectorSourceAccessConfig = SelectorSourceAccessConfig(),
 
     // Search done. Now we should have Medias.
     val filterByEpisodeSort: Boolean = true,
     val filterBySubjectName: Boolean = true,
+    val subjectDetailsConcurrency: Int = 4,
 
     // When playing a media:
     val selectMedia: SelectMediaConfig = SelectMediaConfig(),
@@ -121,6 +123,7 @@ data class SelectorSearchConfig(
         val matchVideoUrl: String = """(^http(s)?:\/\/(?!.*http(s)?:\/\/).+((\.mp4)|(\.mkv)|(m3u8)).*(\?.+)?)|(akamaized)|(bilivideo.com)""",
         val cookies: String = """quality=1080""",
         val addHeadersToVideo: VideoHeaders = VideoHeaders(),
+        val bootstrap: BootstrapConfig = BootstrapConfig(),
     ) {
         val matchNestedUrlRegex by lazy {
             Regex.parseOrNull(matchNestedUrl)
@@ -128,6 +131,13 @@ data class SelectorSearchConfig(
         val matchVideoUrlRegex by lazy {
             Regex.parseOrNull(matchVideoUrl)
         }
+
+        @Serializable
+        data class BootstrapConfig(
+            val userAgent: String = "",
+            val referer: String = "",
+            val headers: Map<String, String> = emptyMap(),
+        )
     }
 
     @Serializable
