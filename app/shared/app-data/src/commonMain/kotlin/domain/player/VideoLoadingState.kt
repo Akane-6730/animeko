@@ -57,3 +57,6 @@ sealed interface VideoLoadingState {
         val cause: Throwable,
     ) : Failed()
 }
+
+val VideoLoadingState.isTerminalFailure: Boolean
+    get() = this is VideoLoadingState.Failed && this !is VideoLoadingState.Cancelled

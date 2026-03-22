@@ -14,16 +14,16 @@ import kotlin.test.assertEquals
 
 class VideoResolverSettingsTest {
     @Test
-    fun `default timeout is 8 seconds`() {
-        assertEquals(8, VideoResolverSettings.Default.effectiveResourceExtractionTimeoutSeconds)
-        assertEquals(8_000L, VideoResolverSettings.Default.effectiveResourceExtractionTimeoutMillis)
+    fun `default timeout is 5 seconds`() {
+        assertEquals(5, VideoResolverSettings.Default.effectiveResourceExtractionTimeoutSeconds)
+        assertEquals(5_000L, VideoResolverSettings.Default.effectiveResourceExtractionTimeoutMillis)
     }
 
     @Test
     fun `invalid timeout falls back to default`() {
         val settings = VideoResolverSettings(resourceExtractionTimeoutSeconds = 9)
 
-        assertEquals(8, settings.effectiveResourceExtractionTimeoutSeconds)
-        assertEquals(8_000L, settings.effectiveResourceExtractionTimeoutMillis)
+        assertEquals(5, settings.effectiveResourceExtractionTimeoutSeconds)
+        assertEquals(5_000L, settings.effectiveResourceExtractionTimeoutMillis)
     }
 }

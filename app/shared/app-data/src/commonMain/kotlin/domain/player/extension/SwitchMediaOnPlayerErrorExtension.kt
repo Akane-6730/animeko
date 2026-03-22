@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -30,6 +31,7 @@ import me.him188.ani.app.domain.media.selector.MediaSelectorSourceTiers
 import me.him188.ani.app.domain.media.selector.autoSelect
 import me.him188.ani.app.domain.mediasource.GetMediaSelectorSourceTiersUseCase
 import me.him188.ani.app.domain.player.VideoLoadingState
+import me.him188.ani.app.domain.player.isTerminalFailure
 import me.him188.ani.app.domain.settings.GetMediaSelectorSettingsFlowUseCase
 import me.him188.ani.app.domain.settings.GetVideoScaffoldConfigUseCase
 import me.him188.ani.datasources.api.source.MediaSourceKind
@@ -121,11 +123,15 @@ class SwitchMediaOnPlayerErrorExtension(
                 videoLoadingStateFlow, // 解析链接出错 (未匹配到链接)
                 playbackStateFlow, // 解析成功, 但播放器出错 (无法链接到链接, 例如链接错误)
             ) { videoLoadingState, playbackState ->
-                videoLoadingState is VideoLoadingState.Failed || playbackState == PlaybackState.ERROR
-            }.distinctUntilChanged()
-                .collectLatest { isError ->
-                    if (isError) {
-                        handleError(bundle.mediaFetchSession, bundle.mediaSelector)
+                ErrorState(
+                    videoLoadingState = videoLoadingState,
+                    isError = videoLoadingState.isTerminalFailure || playbackState == PlaybackState.ERROR,
+                )
+            }.map { it.isError to it.videoLoadingState }
+                .distinctUntilChanged()
+                .collectLatest { state ->
+                    if (state.first) {
+                        handleError(bundle.mediaFetchSession, bundle.mediaSelector, state.second)
                     } // else: cancel selection
                 }
         }
@@ -159,6 +165,7 @@ internal class PlayerLoadErrorHandler(
     suspend fun handleError(
         session: MediaFetchSession,
         mediaSelector: MediaSelector,
+        videoLoadingState: VideoLoadingState,
     ) {
         // 播放出错了
         logger.info { "Player errored, automatically switching to next media" }
@@ -168,7 +175,13 @@ internal class PlayerLoadErrorHandler(
             blacklistedMediaIds = blacklistedMediaIds.add(it.mediaId) // thread-safe
         }
 
-        delay(1.seconds) // 稍等让用户看到播放出错
+        delay(
+            if (videoLoadingState.isTerminalFailure) {
+                250
+            } else {
+                1.seconds.inWholeMilliseconds
+            }
+        )
 
         // Load data in parallel
         val (preferKind, sourceTiers) = combine(
@@ -199,3 +212,8 @@ internal class PlayerLoadErrorHandler(
     @VisibleForTesting
     val blacklist: Set<String> get() = blacklistedMediaIds
 }
+
+private data class ErrorState(
+    val videoLoadingState: VideoLoadingState,
+    val isError: Boolean,
+)

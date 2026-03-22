@@ -35,7 +35,7 @@ data class VideoResolverSettings(
         get() = effectiveResourceExtractionTimeoutSeconds * 1_000L
 
     companion object {
-        const val DEFAULT_RESOURCE_EXTRACTION_TIMEOUT_SECONDS = 8
+        const val DEFAULT_RESOURCE_EXTRACTION_TIMEOUT_SECONDS = 5
         val ResourceExtractionTimeoutSecondsOptions = listOf(3, 5, 8, 10, 15, 20, 30)
 
         val Default = VideoResolverSettings()
