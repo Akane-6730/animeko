@@ -12,6 +12,9 @@ package me.him188.ani.app.domain.mediasource.web
 
 import io.ktor.client.request.get
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asFlow
@@ -59,6 +62,8 @@ import me.him188.ani.utils.platform.currentTimeMillis
 import kotlin.concurrent.atomics.AtomicLong
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.time.Duration
+
+class SelectorMediaSourceBlockedException(message: String) : IllegalStateException(message)
 
 @Suppress("unused") // bug
 private typealias ArgumentType = SelectorMediaSourceArguments
@@ -205,19 +210,12 @@ class SelectorMediaSource(
             is Platform.Android -> "exoplayer"
             Platform.Ios -> "avkit"
         }
-        if (
-            searchConfig.onlySupportsPlayers.isNotEmpty()
-            && currentPlayerName !in searchConfig.onlySupportsPlayers
-        ) {
+        val accessEvaluation = evaluateSourceAccess(searchConfig, currentPlayerName)
+        if (accessEvaluation.access.isBlocked) {
             logger.warn {
-                val supports =
-                    searchConfig.onlySupportsPlayers.joinToString(prefix = "[", postfix = "]")
-
-                "SelectorMediaSource '${info.displayName}' is not supported by the platform player. " +
-                        "Declared supported players: $supports, " +
-                        "current player: $currentPlayerName"
+                accessEvaluation.access.toMessage(info.displayName)
             }
-            return@withContext emptyList()
+            throw SelectorMediaSourceBlockedException(accessEvaluation.access.toMessage(info.displayName))
         }
 
         searchSubjects(
@@ -228,32 +226,57 @@ class SelectorMediaSource(
         ).let { (_, document) ->
             document ?: return@let emptyList()
 
-            buildList {
-                val subjects = selectSubjects(document, searchConfig)
-                    .orEmpty()
-                    .let { originalList ->
-                        val filters = searchConfig.createFiltersForSubject()
-                        with(query.toFilterContext()) {
-                            originalList.filter {
-                                filters.applyOn(it.asCandidate())
-                            }
+            val subjects = selectSubjects(document, searchConfig)
+                .orEmpty()
+                .let { originalList ->
+                    val filters = searchConfig.createFiltersForSubject()
+                    with(query.toFilterContext()) {
+                        originalList.filter {
+                            filters.applyOn(it.asCandidate())
                         }
                     }
+                }
 
-                for (subjectInfo in subjects) {
-                    val episodeDocument = kotlin.runCatching { doHttpGet(subjectInfo.fullUrl) }.getOrNull() ?: continue
-                    val episodes =
-                        selectEpisodes(episodeDocument, subjectInfo.fullUrl, searchConfig)?.episodes ?: continue
-                    repository.addCache(mediaSourceId, query.subjectName, subjectInfo, episodes)
-                    addAll(
-                        selectMedia(
-                            episodes.asSequence(),
-                            searchConfig,
-                            query,
-                            mediaSourceId,
-                            subjectName = subjectInfo.name,
-                        ).filteredList,
-                    )
+            coroutineScope {
+                data class SubjectFetchOutcome(
+                    val medias: List<DefaultMedia>,
+                    val failedRequest: Boolean,
+                )
+
+                buildList {
+                    subjects
+                        .chunked(searchConfig.subjectDetailsConcurrency.coerceAtLeast(1))
+                        .forEach { chunk ->
+                            val outcomes = chunk.map { subjectInfo ->
+                                async {
+                                    val episodeDocument = kotlin.runCatching { doHttpGet(subjectInfo.fullUrl) }
+                                        .getOrElse {
+                                            return@async SubjectFetchOutcome(emptyList(), failedRequest = true)
+                                        }
+                                    val episodes = selectEpisodes(episodeDocument, subjectInfo.fullUrl, searchConfig)?.episodes
+                                        ?: return@async SubjectFetchOutcome(emptyList(), failedRequest = false)
+                                    repository.addCache(mediaSourceId, query.subjectName, subjectInfo, episodes)
+                                    SubjectFetchOutcome(
+                                        medias = selectMedia(
+                                            episodes.asSequence(),
+                                            searchConfig,
+                                            query,
+                                            mediaSourceId,
+                                            subjectName = subjectInfo.name,
+                                            access = accessEvaluation.access,
+                                        ).mediaCandidates.map { it.media },
+                                        failedRequest = false,
+                                    )
+                                }
+                            }.awaitAll()
+
+                            val failedSubjectDetails = outcomes.count { it.failedRequest }
+                            addAll(outcomes.flatMap { it.medias })
+
+                            if (chunk.isNotEmpty() && outcomes.all { it.medias.isEmpty() } && failedSubjectDetails == chunk.size) {
+                                throw IllegalStateException("All selector subject detail requests failed for ${info.displayName}")
+                            }
+                        }
                 }
             }
         }
@@ -294,8 +317,14 @@ class SelectorMediaSource(
 
             override fun patchConfig(config: WebViewConfig): WebViewConfig {
                 val myCookies = arguments.searchConfig.matchVideo.cookies
+                val myBootstrap = arguments.searchConfig.createBootstrapConfig()
                 return config.copy(
-                    cookies = myCookies.lines().filter { it.isNotBlank() },
+                    cookies = (config.cookies + myCookies.lines().filter { it.isNotBlank() }).distinct(),
+                    bootstrap = config.bootstrap.copy(
+                        userAgent = myBootstrap.userAgent ?: config.bootstrap.userAgent,
+                        headers = config.bootstrap.headers + myBootstrap.headers,
+                        auth = myBootstrap.auth,
+                    ),
                 )
             }
         }

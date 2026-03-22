@@ -170,7 +170,11 @@ class AndroidWebViewVideoExtractor(
                             if (webView.url == url) return@launch // avoid infinite loop
                             if (!loadedNestedUrls.add(url)) return@launch
                             logger.info { "WebView navigating to new url: $url" }
-                            webView.loadUrl(url)
+                            if (config.bootstrap.headers.isEmpty()) {
+                                webView.loadUrl(url)
+                            } else {
+                                webView.loadUrl(url, config.bootstrap.headers)
+                            }
 //                            createWebView(context, deferred, ::handleUrl).loadUrl(url)
                         }
                         return false
@@ -179,7 +183,12 @@ class AndroidWebViewVideoExtractor(
             }
 
             loadedNestedUrls.add(pageUrl)
-            createWebView(context, deferred, ::handleUrl).loadUrl(pageUrl)
+            val webView = createWebView(context, config, deferred, ::handleUrl)
+            if (config.bootstrap.headers.isEmpty()) {
+                webView.loadUrl(pageUrl)
+            } else {
+                webView.loadUrl(pageUrl, config.bootstrap.headers)
+            }
 
             //            webView.webChromeClient = object : WebChromeClient() {
             //                override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
@@ -213,6 +222,7 @@ class AndroidWebViewVideoExtractor(
     @OptIn(DelicateCoroutinesApi::class)
     private fun createWebView(
         context: Context,
+        config: WebViewConfig,
         deferred: CompletableDeferred<WebResource>,
         handleUrl: (WebView, String) -> Boolean,
     ): WebView = WebView(context).apply {
@@ -226,7 +236,8 @@ class AndroidWebViewVideoExtractor(
         webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
         webView.settings.domStorageEnabled = true
         webView.settings.userAgentString =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            config.bootstrap.userAgent
+                ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         webView.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(
                 view: WebView,

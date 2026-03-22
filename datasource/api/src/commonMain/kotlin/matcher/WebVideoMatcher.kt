@@ -37,11 +37,25 @@ fun interface WebVideoMatcher { // SPI service load
 
 data class WebViewConfig(
     val cookies: List<String> = emptyList(),
+    val bootstrap: WebViewBootstrapConfig = WebViewBootstrapConfig(),
 ) {
     companion object {
         val Empty = WebViewConfig()
     }
 }
+
+data class WebViewBootstrapConfig(
+    val userAgent: String? = null,
+    val headers: Map<String, String> = emptyMap(),
+    val auth: WebViewAuthConfig = WebViewAuthConfig(),
+)
+
+data class WebViewAuthConfig(
+    val requiresAuth: Boolean = false,
+    val hasChallenge: Boolean = false,
+    val challengeUrlPatterns: List<String> = emptyList(),
+    val playerSupport: List<String> = emptyList(),
+)
 
 val WebVideoMatcher.MatchResult.videoOrNull get() = (this as? WebVideoMatcher.MatchResult.Matched)?.video
 

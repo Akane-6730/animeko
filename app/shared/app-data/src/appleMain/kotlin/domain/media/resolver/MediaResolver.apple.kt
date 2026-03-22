@@ -34,6 +34,7 @@ import org.openani.mediamp.source.MediaData
 import platform.CoreGraphics.CGRectMake
 import platform.Foundation.NSHTTPCookie
 import platform.Foundation.NSHTTPCookieStorage
+import platform.Foundation.NSMutableURLRequest
 import platform.Foundation.NSURL
 import platform.Foundation.NSURLRequest
 import platform.WebKit.WKAudiovisualMediaTypeNone
@@ -247,8 +248,10 @@ class IosWebViewVideoExtractor(
         suspend fun run(): WebResource? {
             logger.info { "Starting webview for $pageUrl" }
             webView.setCustomUserAgent(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
-                        "Chrome/58.0.3029.110 Safari/537.3",
+                config.bootstrap.userAgent ?: (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+                            "Chrome/58.0.3029.110 Safari/537.3"
+                    ),
             )
 
             try {
@@ -259,7 +262,13 @@ class IosWebViewVideoExtractor(
                 webView.navigationDelegate = navDelegate
 
                 logger.info { "Loading page: $pageUrl" }
-                webView.loadRequest(NSURLRequest.requestWithURL(NSURL(string = pageUrl)))
+                val request = NSMutableURLRequest.requestWithURL(NSURL(string = pageUrl)).apply {
+                    setHTTPMethod("GET")
+                    config.bootstrap.headers.forEach { (key, value) ->
+                        setValue(value, forHTTPHeaderField = key)
+                    }
+                }
+                webView.loadRequest(request)
 
                 val result = withTimeoutOrNull(timeoutMillis) {
                     deferred.await()
@@ -304,7 +313,13 @@ class IosWebViewVideoExtractor(
                 WebViewVideoExtractor.Instruction.LoadPage -> {
                     logger.info { "Load nested page: $url" }
                     webView.stopLoading()
-                    webView.loadRequest(NSURLRequest.requestWithURL(NSURL(string = url)))
+                    val request = NSMutableURLRequest.requestWithURL(NSURL(string = url)).apply {
+                        setHTTPMethod("GET")
+                        config.bootstrap.headers.forEach { (key, value) ->
+                            setValue(value, forHTTPHeaderField = key)
+                        }
+                    }
+                    webView.loadRequest(request)
                     return WKNavigationActionPolicy.WKNavigationActionPolicyCancel
                 }
             }
