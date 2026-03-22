@@ -59,6 +59,7 @@ data class MediaSourceResultPresentation(
     val isWorking: Boolean get() = state.isWorking
     val isDisabled: Boolean get() = state.isDisabled
     val isFailedOrAbandoned: Boolean get() = state.isFailedOrAbandoned
+    val blockedMessage: String? get() = (state as? MediaSourceFetchState.Blocked)?.message
 }
 
 /**
@@ -277,4 +278,3 @@ private class TestMediaSourceResult(
         }
     }
 }
-

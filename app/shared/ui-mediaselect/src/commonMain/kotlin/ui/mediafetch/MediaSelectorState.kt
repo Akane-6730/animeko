@@ -229,7 +229,7 @@ class MediaSelectorState(
                 sorted.sortedBy {
                     val state = states.getOrNull(results.indexOf(it))
                         ?: return@sortedBy 0 // should not happen. Just defensive
-                    if (state is MediaSourceFetchState.Failed) {
+                    if (state is MediaSourceFetchState.Failed || state is MediaSourceFetchState.Blocked) {
                         1 // 错误的放后面
                     } else {
                         -1
@@ -364,4 +364,3 @@ fun createTestMediaSelectorState(backgroundScope: CoroutineScope) =
         preferredWebMediaSource = flowOf(null),
         backgroundScope,
     )
-

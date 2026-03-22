@@ -326,8 +326,8 @@ private fun MediaSourceResultCard(
 
                             source.isFailedOrAbandoned -> {
                                 CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.error) {
-                                    Icon(Icons.Outlined.Close, "查询失败")
-                                    Text("点击重试")
+                                    Icon(Icons.Outlined.Close, if (source.state is me.him188.ani.app.domain.media.fetch.MediaSourceFetchState.Blocked) "源被阻止" else "查询失败")
+                                    Text(source.blockedMessage ?: "点击重试")
                                 }
                             }
 
@@ -344,6 +344,14 @@ private fun MediaSourceResultCard(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
+                        source.blockedMessage?.let { message ->
+                            Text(
+                                message,
+                                color = MaterialTheme.colorScheme.error,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
             }
@@ -364,7 +372,7 @@ private fun MediaSourceResultCard(
 
                     source.isFailedOrAbandoned -> {
                         CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.error) {
-                            Icon(Icons.Outlined.Close, "查询失败")
+                            Icon(Icons.Outlined.Close, if (source.state is me.him188.ani.app.domain.media.fetch.MediaSourceFetchState.Blocked) "源被阻止" else "查询失败")
                         }
                     }
 
