@@ -301,9 +301,11 @@ class SubjectCollectionRepositoryImpl(
     override fun batchLightSubjectAndEpisodesFlow(subjectIds: IntList): Flow<List<LightSubjectAndEpisodes>> {
         return flow {
             val existing = subjectCollectionDao.filterByIds(subjectIds.toIntArray()).first()
+            val existingById = existing.associateBy { it.subjectId }
+            val freshExisting = existing.filterNot { it.isExpired() }
             val missingIds = mutableIntListOf()
             subjectIds.forEach { subjectId ->
-                val existingSubject = existing.find { it.subjectId == subjectId }
+                val existingSubject = existingById[subjectId]
                 if (existingSubject == null || existingSubject.isExpired()) {
                     missingIds.add(subjectId)
                 }
@@ -311,7 +313,7 @@ class SubjectCollectionRepositoryImpl(
 
             coroutineScope {
                 val fromExistingDeferred = async {
-                    existing.asFlow()
+                    freshExisting.asFlow()
                         .flatMapMerge(concurrency = 4) { entity ->
                             episodeCollectionRepository
                                 .subjectEpisodeCollectionInfosFlow(entity.subjectId)
@@ -328,7 +330,18 @@ class SubjectCollectionRepositoryImpl(
                 val fromMissingDeferred = async {
                     subjectService.batchGetLightSubjectAndEpisodes(missingIds) // TODO: 2025/1/14 batchGetLightSubjectEpisodes 没有按 epType 过滤
                 }
-                emit(fromExistingDeferred.await() + fromMissingDeferred.await())
+                val existingResults = fromExistingDeferred.await().associateBy { it.subject.subjectId }
+                val missingResults = fromMissingDeferred.await().associateBy { it.subject.subjectId }
+                emit(
+                    buildList {
+                        subjectIds.forEach { subjectId ->
+                            val result = missingResults[subjectId] ?: existingResults[subjectId]
+                            if (result != null) {
+                                add(result)
+                            }
+                        }
+                    },
+                )
             }
         }
     }

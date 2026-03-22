@@ -52,37 +52,51 @@ object AnimeScheduleHelper {
         localTimeZone: TimeZone,
         allowedDeviation: Duration = 24.hours,
     ): List<EpisodeNextAiringTime> {
+        return buildAiringScheduleForDateRange(
+            subjects = subjects,
+            airInfos = airInfos,
+            dates = listOf(targetDate),
+            localTimeZone = localTimeZone,
+            allowedDeviation = allowedDeviation,
+        )[targetDate].orEmpty()
+    }
+
+    fun buildAiringScheduleForDateRange(
+        subjects: List<LightSubjectAndEpisodes>,
+        airInfos: List<OnAirAnimeInfo>,
+        dates: List<LocalDate>,
+        localTimeZone: TimeZone,
+        allowedDeviation: Duration = 24.hours,
+    ): Map<LocalDate, List<EpisodeNextAiringTime>> {
+        if (dates.isEmpty()) return emptyMap()
+
         // Pre-map OnAirAnimeInfo by bangumiId (subjectId)
         val subjectIdToAirInfo = MutableIntObjectMap<OnAirAnimeInfo>(subjects.size).apply {
             airInfos.forEach { put(it.bangumiId, it) }
         }
 
-        return subjects.mapNotNull { subject ->
-            val airInfo = subjectIdToAirInfo[subject.subjectId] ?: return@mapNotNull null
+        val targetDates = dates.toHashSet()
+        val results = linkedMapOf<LocalDate, MutableList<EpisodeNextAiringTime>>()
+        dates.forEach { results.getOrPut(it) { mutableListOf() } }
 
-            // If we have no actual begin time or no recurrence, skip
-            val startTime = airInfo.begin ?: return@mapNotNull null
-            val recurrence = airInfo.recurrence ?: return@mapNotNull null
+        subjects.forEach { subject ->
+            val airInfo = subjectIdToAirInfo[subject.subjectId] ?: return@forEach
 
-            // Sort episodes in ascending order of "sort"
+            val startTime = airInfo.begin ?: return@forEach
+            val recurrence = airInfo.recurrence ?: return@forEach
+
             val episodes = subject.episodes.sortedBy { it.sort }
 
             var lastEpisodeInstant: Instant? = null
-            var matchedEpisode: LightEpisodeInfo? = null
-            var matchedEpisodeInstant: Instant? = null
+            val matchedEpisodesByDate = linkedMapOf<LocalDate, EpisodeNextAiringTime>()
 
             episodes.forEachIndexed { index, ep ->
                 val episodeNumber = index + 1
 
-                // 1) Figure out an intended local date/time from ep.airDate (if valid)
                 val epLocalDate: LocalDate? = ep.airDate.toLocalDateOrNull()
-                // We'll interpret it in ep.timezone at 00:00
                 val epLocalMidnight: Instant? = epLocalDate
                     ?.atStartOfDayIn(ep.timezone)
 
-                // 2) Try to snap that epLocalMidnight to the nearest multiple of recurrence.interval
-                //    from the recurrence.startTime, as long as the difference is <= allowedDeviation.
-                //    This is “the ideal actual airing time.” 
                 val snappedAirtime: Instant? = epLocalMidnight?.let { localMidnight ->
                     val diff = localMidnight - recurrence.startTime
                     val n = (diff.inWholeMilliseconds.toDouble() / recurrence.interval.inWholeMilliseconds).roundToInt()
@@ -90,17 +104,12 @@ object AnimeScheduleHelper {
                     val offBy = (candidateAirtime - localMidnight).absoluteValue
 
                     if (offBy <= allowedDeviation) {
-                        // The candidate is "close enough" to the epLocalMidnight
                         candidateAirtime
                     } else {
-                        // If it's too far from the 'intended' date, we disregard snapping
                         null
                     }
                 }
 
-                // 3) If invalid date or snapping is too far, use a guess:
-                //    if we have a lastEpisodeInstant, use lastEpisodeInstant + interval
-                //    else use startTime + (episodeIndex)*interval
                 val actualEpTime: Instant = when {
                     snappedAirtime != null -> {
                         snappedAirtime
@@ -111,33 +120,28 @@ object AnimeScheduleHelper {
                     }
 
                     else -> {
-                        // For the 1st episode if everything else is invalid
                         startTime + recurrence.interval * (episodeNumber - 1)
                     }
                 }
 
-                // Update lastEpisodeInstant
                 lastEpisodeInstant = actualEpTime
 
-                // 4) Now see if that actualEpTime falls on the targetDate (in localTimeZone).
-                //    For example, if actualEpTime is Jan 1 at any time, and targetDate is Jan 1 => match.
                 val actualEpLocalDate = actualEpTime.toLocalDateTime(localTimeZone).date
-                if (actualEpLocalDate == targetDate) {
-                    matchedEpisode = ep
-                    matchedEpisodeInstant = actualEpTime
-                    return@forEachIndexed
+                if (actualEpLocalDate in targetDates) {
+                    matchedEpisodesByDate[actualEpLocalDate] =
+                        EpisodeNextAiringTime(
+                            subjectId = subject.subjectId,
+                            episode = ep,
+                            airingTime = actualEpTime,
+                        )
                 }
             }
 
-            // If no matched episode, skip
-            val nextEpisode = matchedEpisode ?: return@mapNotNull null
-            val nextEpisodeInstant = matchedEpisodeInstant ?: return@mapNotNull null
-
-            EpisodeNextAiringTime(
-                subjectId = subject.subjectId,
-                episode = nextEpisode,
-                airingTime = nextEpisodeInstant,
-            )
+            matchedEpisodesByDate.forEach { (date, episode) ->
+                results.getOrPut(date) { mutableListOf() }.add(episode)
+            }
         }
+
+        return results
     }
 }
